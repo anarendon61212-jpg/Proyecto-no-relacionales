@@ -2,23 +2,25 @@
 
 ## Objetivo
 
-Dejar reproducible la preparación técnica de la Entrega 1 del Sistema RAG NoSQL: conexión a MongoDB Atlas, colecciones con validación, índices requeridos y una API documentada con búsqueda textual, vectorial e híbrida, y respuestas RAG con Google Gemini.
+Dejar reproducible la preparación técnica de la Entrega 1 del Sistema RAG NoSQL: conexión a MongoDB Atlas, colecciones con validación, índices requeridos y una API documentada con búsqueda textual, vectorial e híbrida, búsqueda de imágenes y respuestas RAG con Google Gemini. Los planes de las Personas A y C están en `docs/persona-a-analisis-y-modelado.md` y `docs/persona-c-dataset-y-chunking.md`.
 
 ## Qué quedó implementado
 
-- Configuración mediante `.env` para URI de MongoDB, base de datos, índice vectorial, modelo de embeddings y Gemini (`GEMINI_API_KEY`, `GEMINI_MODEL`). El archivo `.env` está excluido de Git.
+- Configuración mediante `.env` para URI de MongoDB, base de datos, índices vectoriales, modelos de embeddings de texto e imagen y Gemini (`GEMINI_API_KEY`, `GEMINI_MODEL`). El archivo `.env` está excluido de Git.
 - Script de prueba de conexión mediante `ping`.
 - Inicializador idempotente de las colecciones `articulos`, `imagenes`, `chunks` y `usuarios`.
-- Validadores `$jsonSchema` con campos y tipos básicos. Los chunks requieren `doc_id`, `estrategia_chunking`, texto, fecha de ingesta y un vector de 384 componentes; además pueden llevar `idioma` (copiado del artículo) para filtrar la recuperación.
+- Validadores `$jsonSchema` con campos y tipos básicos. Los chunks requieren `doc_id`, `estrategia_chunking`, texto, fecha de ingesta y un vector de 384 componentes; además llevan `idioma` (copiado del artículo) y `parametros_chunking`. Los artículos admiten `url` y `licencia`; las imágenes, `clave`, `licencia`, `atribucion`, `modelo_embedding` y un vector de 512 componentes.
 - Índice compuesto `{ fecha: 1, idioma: 1 }`, índice de texto en título y contenido con idioma por defecto español (stemming y stop words en español; si existía en otro idioma, el script lo recrea), e índice compuesto para localizar chunks por documento y estrategia.
-- Solicitud de creación de Atlas Vector Search sobre `chunks.embedding`, con 384 dimensiones, similitud coseno y filtros por `estrategia_chunking` e `idioma`. Si el índice ya existía con otra definición, el script lo actualiza. Si M0 rechaza la operación desde el driver, el script imprime la definición para crearla desde la interfaz de Atlas.
+- Solicitud de creación de dos índices de Atlas Vector Search: `chunks.embedding` (384 dimensiones, similitud coseno, filtros por `estrategia_chunking` e `idioma`) e `imagenes.embedding` (512 dimensiones, filtro por `categoria`), más un índice único por `imagenes.url`. Si el índice ya existía con otra definición, el script lo actualiza. Si M0 rechaza la operación desde el driver, el script imprime la definición para crearla desde la interfaz de Atlas.
 - API FastAPI con `GET /health`, `POST /search`, `POST /rag` y documentación automática en `/docs`. La API arranca aunque MongoDB no responda; en ese caso `/health` devuelve `503` y se recupera sola cuando la conexión vuelve.
 - `/search` con tres modos: `texto` (índice `$text`), `vector` (Atlas Vector Search sobre chunks, un resultado por artículo con su fragmento más parecido) e `hibrido` (por defecto; combina ambos rankings con Reciprocal Rank Fusion). Filtros por idioma, rango de fechas y estrategia de chunking.
 - `/rag`: genera el embedding de la pregunta, recupera los chunks más parecidos con `$vectorSearch` (unidos a su artículo con `$lookup`) y pide a Gemini una respuesta basada solo en ese contexto, citando los fragmentos como `[1]`, `[2]`. Devuelve también las fuentes usadas. Si no hay chunks relevantes, responde sin llamar a Gemini.
+- Búsqueda de imágenes con CLIP: `POST /imagenes/buscar` (por descripción en texto, con el codificador multilingüe alineado al de imágenes) y `POST /imagenes/similares` (por `imagen_id` o URL). Cada imagen incluye los artículos que la referencian, y `/rag` devuelve las imágenes de los artículos fuente (caso multimodal).
 - Historial de usuario: si `/rag` recibe `usuario_id`, guarda la pregunta embebida en `usuarios.historial`, limitada a las 20 más recientes con `$slice`.
-- Script de ingesta `backend/scripts/ingest.py`: valida artículos desde JSON/JSONL (o re-procesa los que ya están en Atlas con `--desde-mongo`), guarda artículos e imágenes, genera chunks con las estrategias `fixed-size`, `sentence-aware` y `semantic` (`backend/app/chunking.py`) y almacena cada chunk con su embedding normalizado, el idioma del artículo, el modelo y la fecha de ingesta. Es idempotente: actualiza el artículo por `titulo` + `fuente` y reemplaza sus chunks por estrategia.
+- Script de ingesta `backend/scripts/ingest.py`: valida artículos e imágenes desde JSON/JSONL (o re-procesa los artículos de Atlas con `--desde-mongo`), enlaza imágenes por `clave`, detecta duplicados, genera chunks `sentence-aware` y `semantic` con los parámetros del plan de C (`backend/app/chunking.py`), guarda cada chunk con su embedding normalizado y genera el embedding CLIP de las imágenes. Es idempotente: actualiza el artículo por `titulo` + `fuente`, la imagen por `url`, y reemplaza los chunks por estrategia.
 - Datos de prueba en `data/articulos_ejemplo.json` para recorrer el flujo completo: ingesta → `/search` → `/rag`.
-- Pruebas automatizadas con pytest (`backend/tests`), con base de datos y modelos simulados: API, estrategias de chunking e ingesta.
+- Script `backend/scripts/comparar_estrategias.py` para el entregable C5: ejecuta las mismas consultas contra ambas estrategias y guarda JSON y CSV con lo recuperado, columnas para la rúbrica y estadísticas de chunks. Plantilla de consultas en `data/consultas_experimentales.json`.
+- Pruebas automatizadas con pytest (`backend/tests`), con base de datos y modelos simulados: API, imágenes, estrategias de chunking, ingesta y comparación.
 
 ## Cómo ponerlo en marcha
 
@@ -102,4 +104,17 @@ Para correr las pruebas: `pip install -r backend/requirements-dev.txt` y luego `
 
 ## Pendientes externos y siguiente fase
 
-El cluster, el usuario, la contraseña y la lista de IP permitidas dependen de la cuenta Atlas del equipo; el repositorio no contiene esas credenciales y por eso la conexión real queda pendiente de ejecutar localmente. Falta cargar el conjunto de artículos real del proyecto con `ingest.py` (en el formato descrito en el README) y comparar las tres estrategias de chunking con preguntas de prueba. Si se cambia `EMBEDDING_MODEL`, hay que regenerar los chunks con `ingest.py --desde-mongo`. El nombre del modelo de Gemini (`GEMINI_MODEL`) puede cambiar con el tiempo; si Google lo retira, basta con actualizarlo en `.env`.
+El cluster, el usuario, la contraseña y la lista de IP permitidas dependen de la cuenta Atlas del equipo; el repositorio no contiene esas credenciales y por eso la conexión real queda pendiente de ejecutar localmente. Falta cargar el conjunto de artículos real del proyecto con `ingest.py` (en el formato descrito en el README) y ejecutar `comparar_estrategias.py` con las consultas adaptadas por C. Las búsquedas de imágenes requieren que el dataset incluya imágenes accesibles (URL o archivo en el repositorio). Si se cambia `EMBEDDING_MODEL`, hay que regenerar los chunks con `ingest.py --desde-mongo`. El nombre del modelo de Gemini (`GEMINI_MODEL`) puede cambiar con el tiempo; si Google lo retira, basta con actualizarlo en `.env`.
+
+## Coordinación con A y C
+
+Acuerdos que B deja implementados y que A y C deben confirmar o pedir cambiar antes de la ingesta final:
+
+| Tema | Qué dejó B | Qué falta confirmar |
+|---|---|---|
+| Contrato de datos (A2) | Campos y validadores descritos en el README (sección *Formato del dataset*) y en `backend/scripts/init_db.py`. | A congela nombres y tipos; cualquier cambio se refleja en `init_db.py` e `ingest.py`. |
+| Dataset (C1) | `ingest.py` lee `data/<archivo>.json` con `articulos` e `imagenes`; las imágenes pueden ser URL o rutas relativas como `data/imagenes/...`. | C entrega el dataset en esa ruta y decide si las imágenes van como archivos en el repositorio o como URLs. |
+| Chunking (C2, C3) | `backend/app/chunking.py` implementa `sentence-aware` (5 oraciones, solapamiento 1) y `semantic` (umbral 0.80, 2 a 8 oraciones) detrás de `chunk_text(texto, estrategia)`. | C revisa casos reales (abreviaturas, listas, inglés) y ajusta parámetros o reglas en ese módulo; la versión queda registrada en cada chunk. |
+| Modelos | Texto: `all-MiniLM-L6-v2` (384). Imágenes: `clip-ViT-B-32` (512) y su codificador de texto multilingüe. | Todo el equipo usa estos modelos; consultas y corpus deben compartir modelo. |
+| Experimento (C4, C5) | `comparar_estrategias.py` y la plantilla `data/consultas_experimentales.json`. | C adapta las diez consultas y define con A la rúbrica antes de ejecutar. |
+| Índices (A3) | `chunks_vector_index`, `imagenes_vector_index`, texto y compuesto fecha/idioma. | Confirmar en Atlas que los índices vectoriales estén en estado READY antes de presentarlos como creados. |

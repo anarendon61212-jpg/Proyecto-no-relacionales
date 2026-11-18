@@ -61,6 +61,8 @@ def test_rag_responde_con_fuentes_y_guarda_historial(client, database):
     assert body["respuesta"] == "Respuesta [1]"
     assert [f["numero"] for f in body["fuentes"]] == [1, 2]
     assert len(llm.call_args.args[1]) == 2  # solo `limit` chunks van como contexto
+    vector_stage = database.chunks.aggregate.call_args.args[0][0]["$vectorSearch"]
+    assert vector_stage["filter"] == {"estrategia_chunking": {"$eq": "sentence-aware"}}
 
     update = database.usuarios.update_one.call_args
     assert update.kwargs["upsert"] is True

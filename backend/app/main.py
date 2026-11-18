@@ -65,7 +65,13 @@ class RagRequest(BaseModel):
     idioma: str | None = Field(default=None, min_length=2, max_length=10)
     fecha_desde: datetime | None = None
     fecha_hasta: datetime | None = None
-    estrategia_chunking: EstrategiaChunking | None = None
+    estrategia_chunking: EstrategiaChunking = Field(
+        default="sentence-aware",
+        description=(
+            "Estrategia cuyos chunks se usan como contexto. Se usa una sola para no enviar a "
+            "Gemini fragmentos repetidos de varias estrategias."
+        ),
+    )
     limit: int = Field(default=5, ge=1, le=20, description="Chunks que se envían como contexto.")
     usuario_id: str | None = Field(
         default=None, min_length=1, max_length=100,
