@@ -5,14 +5,7 @@
     "idioma": "es",
     "fecha": "2024-03-12",
     "fuente": "Datos de ejemplo",
-    "categoria": "medio ambiente",
-    "imagenes": [
-      {
-        "url": "https://example.com/imagenes/tanque-agua-lluvia.jpg",
-        "categoria": "medio ambiente",
-        "descripcion": "Tanque de captación de agua lluvia en un colegio"
-      }
-    ]
+    "categoria": "medio ambiente"
   },
   {
     "titulo": "Bases de datos documentales en proyectos universitarios",

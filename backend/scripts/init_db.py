@@ -10,7 +10,7 @@ from pymongo import ASCENDING, MongoClient
 from pymongo.errors import OperationFailure, PyMongoError
 from pymongo.operations import SearchIndexModel
 
-from app.config import VECTOR_DIMENSIONS, get_settings
+from app.config import IMAGE_VECTOR_DIMENSIONS, VECTOR_DIMENSIONS, get_settings
 
 
 VALIDATORS = {
@@ -25,6 +25,8 @@ VALIDATORS = {
                 "fecha": {"bsonType": "date"},
                 "categoria": {"bsonType": "string"},
                 "fuente": {"bsonType": "string", "minLength": 1},
+                "url": {"bsonType": "string"},
+                "licencia": {"bsonType": "string"},
                 "imagenes_relacionadas": {
                     "bsonType": "array",
                     "items": {"bsonType": "objectId"},
@@ -39,9 +41,18 @@ VALIDATORS = {
             "properties": {
                 "url": {"bsonType": "string", "minLength": 1},
                 "categoria": {"bsonType": "string", "minLength": 1},
+                "clave": {"bsonType": "string"},
                 "descripcion": {"bsonType": "string"},
                 "fuente": {"bsonType": "string"},
-                "embedding": {"bsonType": "array", "items": {"bsonType": "double"}},
+                "licencia": {"bsonType": "string"},
+                "atribucion": {"bsonType": "string"},
+                "embedding": {
+                    "bsonType": "array",
+                    "minItems": IMAGE_VECTOR_DIMENSIONS,
+                    "maxItems": IMAGE_VECTOR_DIMENSIONS,
+                    "items": {"bsonType": "double"},
+                },
+                "modelo_embedding": {"bsonType": "string"},
             },
         }
     },
@@ -109,6 +120,39 @@ def vector_fields_key(definition: dict) -> list:
     )
 
 
+def vector_definition(dimensions: int, filters: list[str]) -> dict:
+    return {
+        "fields": [
+            {"type": "vector", "path": "embedding", "numDimensions": dimensions, "similarity": "cosine"},
+            *({"type": "filter", "path": path} for path in filters),
+        ]
+    }
+
+
+def ensure_vector_index(collection, name: str, definition: dict) -> None:
+    """Crea o actualiza un índice de Atlas Vector Search; si no se puede, imprime la definición."""
+    try:
+        existing = list(collection.list_search_indexes(name))
+        if existing:
+            current = existing[0].get("latestDefinition", {})
+            if vector_fields_key(current) != vector_fields_key(definition):
+                collection.update_search_index(name, definition)
+                print(f"Índice vectorial actualizado: {name}")
+            else:
+                print(f"Índice vectorial ya existente: {name}")
+        else:
+            collection.create_search_index(
+                model=SearchIndexModel(definition=definition, name=name, type="vectorSearch")
+            )
+            print(f"Índice vectorial solicitado: {name}")
+    except PyMongoError as exc:
+        print(f"No se pudo crear el índice vectorial '{name}' desde el driver:", exc)
+        print("Si el cluster es Atlas M0, créalo desde Atlas > Search & Vector Search.")
+        print(f"Colección: {collection.name} | nombre del índice: {name}")
+        print("Pega esta definición en el editor JSON de Vector Search:")
+        print(json.dumps(definition, indent=2))
+
+
 TEXT_INDEX_NAME = "articulos_text_idx"
 TEXT_INDEX_LANGUAGE = "spanish"  # Stemming y stop words en español para $text.
 
@@ -173,47 +217,19 @@ def main() -> None:
             name="chunks_documento_estrategia_idx",
         )
         database.usuarios.create_index([("usuario_id", ASCENDING)], unique=True, name="usuario_id_unique_idx")
+        database.imagenes.create_index([("url", ASCENDING)], unique=True, name="imagenes_url_unique_idx")
         print("Índices convencionales listos.")
 
-        vector_definition = {
-            "fields": [
-                {
-                    "type": "vector",
-                    "path": "embedding",
-                    "numDimensions": VECTOR_DIMENSIONS,
-                    "similarity": "cosine",
-                },
-                {"type": "filter", "path": "estrategia_chunking"},
-                {"type": "filter", "path": "idioma"},
-            ]
-        }
-        try:
-            existing_vector_indexes = list(
-                database.chunks.list_search_indexes(settings["vector_index_name"])
-            )
-            if existing_vector_indexes:
-                current = existing_vector_indexes[0].get("latestDefinition", {})
-                if vector_fields_key(current) != vector_fields_key(vector_definition):
-                    database.chunks.update_search_index(
-                        settings["vector_index_name"], vector_definition
-                    )
-                    print(f"Índice vectorial actualizado: {settings['vector_index_name']}")
-                else:
-                    print(f"Índice vectorial ya existente: {settings['vector_index_name']}")
-            else:
-                search_index = SearchIndexModel(
-                    definition=vector_definition,
-                    name=settings["vector_index_name"],
-                    type="vectorSearch",
-                )
-                database.chunks.create_search_index(model=search_index)
-                print(f"Índice vectorial solicitado: {settings['vector_index_name']}")
-        except PyMongoError as exc:
-            print("No se pudo crear el índice vectorial desde el driver:", exc)
-            print("Si el cluster es Atlas M0, créalo desde Atlas > Search & Vector Search.")
-            print(f"Nombre del índice: {settings['vector_index_name']}")
-            print("Pega esta definición en el editor JSON de Vector Search:")
-            print(json.dumps(vector_definition, indent=2))
+        ensure_vector_index(
+            database.chunks,
+            settings["vector_index_name"],
+            vector_definition(VECTOR_DIMENSIONS, ["estrategia_chunking", "idioma"]),
+        )
+        ensure_vector_index(
+            database.imagenes,
+            settings["image_vector_index_name"],
+            vector_definition(IMAGE_VECTOR_DIMENSIONS, ["categoria"]),
+        )
     finally:
         client.close()
 

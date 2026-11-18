@@ -1,12 +1,19 @@
-"""Ingesta: carga artículos, los divide en chunks con cada estrategia y guarda sus embeddings.
+"""Ingesta: carga artículos e imágenes, divide los artículos en chunks y genera los embeddings.
 
 Ejemplos (desde la raíz del repositorio):
     python backend/scripts/ingest.py data/articulos_ejemplo.json
-    python backend/scripts/ingest.py data/articulos.jsonl --estrategias sentence-aware fixed-size
+    python backend/scripts/ingest.py data/dataset.json --estrategias sentence-aware fixed-size
     python backend/scripts/ingest.py --desde-mongo          # re-procesa los artículos ya cargados
 
-Es idempotente: un artículo se identifica por (titulo, fuente) y se actualiza si ya existe;
-sus chunks de cada estrategia se reemplazan por completo en cada ejecución.
+Formatos de entrada:
+- .json con una lista de artículos, o con un objeto {"articulos": [...], "imagenes": [...]}.
+- .jsonl con un artículo por línea.
+Cada artículo puede traer "imagenes" como objetos completos o como claves ("clave") de la
+lista "imagenes" del archivo. Las imágenes de esa lista se cargan aunque ningún artículo
+las referencie.
+
+Es idempotente: un artículo se identifica por (titulo, fuente) y una imagen por su url;
+los chunks de cada estrategia se reemplazan por completo en cada ejecución.
 """
 
 import argparse
@@ -22,10 +29,12 @@ from pymongo.errors import PyMongoError
 
 from app.chunking import ESTRATEGIAS, ESTRATEGIAS_EXPERIMENTO, chunk_text, parametros
 from app.config import get_settings
-from app.embeddings import EmbeddingError, embed_texts
+from app.embeddings import EmbeddingError, ImageLoadError, embed_images, embed_texts, load_image
 
 REQUIRED_FIELDS = ("titulo", "contenido_texto", "idioma", "fecha", "fuente")
-OPTIONAL_FIELDS = ("categoria",)
+OPTIONAL_FIELDS = ("categoria", "url", "licencia")
+IMAGE_REQUIRED_FIELDS = ("url", "categoria")
+IMAGE_OPTIONAL_FIELDS = ("clave", "descripcion", "fuente", "licencia", "atribucion")
 
 
 def parse_fecha(value) -> datetime:
@@ -44,52 +53,75 @@ def parse_fecha(value) -> datetime:
     return parsed
 
 
-def load_articles(path: Path) -> list[dict]:
-    """Lee una lista JSON (.json) o un objeto por línea (.jsonl)."""
+def load_dataset(path: Path) -> tuple[list[dict], list[dict]]:
+    """Devuelve (artículos, imágenes del catálogo) desde .json o .jsonl."""
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() == ".jsonl":
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
+        return [json.loads(line) for line in text.splitlines() if line.strip()], []
     data = json.loads(text)
-    if not isinstance(data, list):
-        raise ValueError("El archivo JSON debe contener una lista de artículos.")
-    return data
+    if isinstance(data, list):
+        return data, []
+    if isinstance(data, dict) and isinstance(data.get("articulos"), list):
+        return data["articulos"], list(data.get("imagenes") or [])
+    raise ValueError('El JSON debe ser una lista de artículos o un objeto con "articulos" (e "imagenes").')
 
 
-def normalize_article(raw: dict) -> tuple[dict, list[dict]]:
-    """Valida campos obligatorios y separa las imágenes. Lanza ValueError si falta algo."""
-    missing = [
-        field for field in REQUIRED_FIELDS if not isinstance(raw.get(field), str) or not raw[field].strip()
-    ]
+def load_articles(path: Path) -> list[dict]:
+    return load_dataset(path)[0]
+
+
+def _text_fields(raw: dict, required: tuple, optional: tuple, what: str) -> dict:
+    missing = [f for f in required if not isinstance(raw.get(f), str) or not raw[f].strip()]
     if missing:
-        raise ValueError(f"faltan campos obligatorios o están vacíos: {', '.join(missing)}")
-
-    article = {field: raw[field].strip() for field in REQUIRED_FIELDS if field != "fecha"}
-    article["fecha"] = parse_fecha(raw["fecha"])
-    for field in OPTIONAL_FIELDS:
+        raise ValueError(f"{what}: faltan campos obligatorios o están vacíos: {', '.join(missing)}")
+    values = {f: raw[f].strip() for f in required}
+    for field in optional:
         if isinstance(raw.get(field), str) and raw[field].strip():
-            article[field] = raw[field].strip()
+            values[field] = raw[field].strip()
+    return values
 
+
+def normalize_image(raw) -> dict:
+    if not isinstance(raw, dict):
+        raise ValueError("cada imagen debe ser un objeto o la clave de una imagen del catálogo")
+    return _text_fields(raw, IMAGE_REQUIRED_FIELDS, IMAGE_OPTIONAL_FIELDS, "imagen")
+
+
+def normalize_article(raw: dict) -> tuple[dict, list]:
+    """Valida el artículo. Devuelve el documento y sus imágenes (objetos o claves del catálogo)."""
+    fields = _text_fields(
+        raw, tuple(f for f in REQUIRED_FIELDS if f != "fecha"), OPTIONAL_FIELDS, "artículo"
+    )
+    if raw.get("fecha") in (None, ""):
+        raise ValueError("artículo: faltan campos obligatorios o están vacíos: fecha")
+    fields["fecha"] = parse_fecha(raw["fecha"])
     images = []
     for image in raw.get("imagenes", []) or []:
-        if not isinstance(image, dict) or not image.get("url") or not image.get("categoria"):
-            raise ValueError("cada imagen necesita al menos 'url' y 'categoria'")
-        images.append(
-            {key: str(image[key]) for key in ("url", "categoria", "descripcion", "fuente") if image.get(key)}
-        )
-    return article, images
+        images.append(image.strip() if isinstance(image, str) else normalize_image(image))
+    return fields, images
 
 
-def upsert_images(database, images: list[dict]) -> list:
+def upsert_image(database, image: dict):
+    stored = database.imagenes.find_one_and_update(
+        {"url": image["url"]},
+        {"$set": image},
+        upsert=True,
+        projection={"_id": 1},
+        return_document=ReturnDocument.AFTER,
+    )
+    return stored["_id"]
+
+
+def resolve_images(database, images: list, catalog_ids: dict) -> list:
+    """Convierte las imágenes de un artículo en ObjectIds (guardando las que vienen completas)."""
     ids = []
     for image in images:
-        stored = database.imagenes.find_one_and_update(
-            {"url": image["url"]},
-            {"$set": image},
-            upsert=True,
-            projection={"_id": 1},
-            return_document=ReturnDocument.AFTER,
-        )
-        ids.append(stored["_id"])
+        if isinstance(image, str):
+            if image not in catalog_ids:
+                raise ValueError(f"la imagen con clave '{image}' no está en la lista de imágenes")
+            ids.append(catalog_ids[image])
+        else:
+            ids.append(upsert_image(database, image))
     return ids
 
 
@@ -135,9 +167,27 @@ def replace_chunks(database, doc_id, estrategia: str, documents: list[dict]) -> 
         database.chunks.insert_many(documents)
 
 
+def embed_pending_images(database, model_name: str, reprocess: bool) -> tuple[int, list[str]]:
+    """Genera el embedding CLIP de las imágenes que no lo tienen (o de todas con `reprocess`)."""
+    # $ne también coincide con las imágenes que aún no tienen modelo_embedding.
+    query = {} if reprocess else {"modelo_embedding": {"$ne": model_name}}
+    done, failed = 0, []
+    for image in database.imagenes.find(query, {"url": 1}):
+        try:
+            vector = embed_images([load_image(image["url"])], model_name)[0]
+        except ImageLoadError as exc:
+            failed.append(str(exc))
+            continue
+        database.imagenes.update_one(
+            {"_id": image["_id"]}, {"$set": {"embedding": vector, "modelo_embedding": model_name}}
+        )
+        done += 1
+    return done, failed
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("archivo", nargs="?", type=Path, help="Archivo .json (lista) o .jsonl con artículos.")
+    parser.add_argument("archivo", nargs="?", type=Path, help="Archivo .json o .jsonl con el dataset.")
     parser.add_argument(
         "--desde-mongo", action="store_true", help="Re-procesa los artículos que ya están en la colección."
     )
@@ -146,6 +196,13 @@ def parse_args(argv=None):
         help="Estrategias de chunking a generar (por defecto, sentence-aware y semantic).",
     )
     parser.add_argument("--limite", type=int, default=None, help="Procesa solo los primeros N artículos.")
+    parser.add_argument(
+        "--sin-imagenes", action="store_true", help="No genera embeddings de imágenes (más rápido)."
+    )
+    parser.add_argument(
+        "--reprocesar-imagenes", action="store_true",
+        help="Regenera el embedding de todas las imágenes, no solo de las que no lo tienen.",
+    )
     args = parser.parse_args(argv)
     if bool(args.archivo) == args.desde_mongo:
         parser.error("indica un archivo de artículos o --desde-mongo (solo uno de los dos).")
@@ -166,15 +223,27 @@ def main(argv=None) -> int:
     procesados, fallidos, total_chunks = 0, 0, 0
     try:
         client.admin.command("ping")
+        catalog_ids: dict = {}
         if args.desde_mongo:
             raw_articles = list(database.articulos.find({}, {"imagenes_relacionadas": 0}))
         else:
-            raw_articles = load_articles(args.archivo)
+            raw_articles, raw_images = load_dataset(args.archivo)
+            for position, raw in enumerate(raw_images, start=1):
+                try:
+                    image = normalize_image(raw)
+                    image_id = upsert_image(database, image)
+                    if "clave" in image:
+                        catalog_ids[image["clave"]] = image_id
+                except (ValueError, PyMongoError) as exc:
+                    print(f"Imagen {position}: OMITIDA ({exc})")
+            if raw_images:
+                print(f"Imágenes del catálogo guardadas: {len(raw_images)}")
         if args.limite is not None:
             raw_articles = raw_articles[: args.limite]
         print(f"Artículos a procesar: {len(raw_articles)} | estrategias: {', '.join(args.estrategias)}")
         print(f"Modelo de embeddings: {model_name} (la primera vez se descarga)")
 
+        vistos: set = set()
         for position, raw in enumerate(raw_articles, start=1):
             etiqueta = f"[{position}/{len(raw_articles)}] {str(raw.get('titulo', '(sin título)'))[:60]}"
             try:
@@ -182,7 +251,11 @@ def main(argv=None) -> int:
                     article, doc_id = raw, raw["_id"]
                 else:
                     article, images = normalize_article(raw)
-                    doc_id = upsert_article(database, article, upsert_images(database, images))
+                    key = (article["titulo"].casefold(), article["fuente"].casefold())
+                    if key in vistos:
+                        raise ValueError("artículo duplicado en el archivo (mismo título y fuente)")
+                    vistos.add(key)
+                    doc_id = upsert_article(database, article, resolve_images(database, images, catalog_ids))
                 counts = []
                 for estrategia in args.estrategias:
                     documents = build_chunk_documents(
@@ -197,6 +270,13 @@ def main(argv=None) -> int:
                 # Un artículo inválido (o rechazado por el validador) no detiene la ingesta.
                 fallidos += 1
                 print(f"{etiqueta}: OMITIDO ({exc})")
+
+        if not args.sin_imagenes:
+            print(f"Generando embeddings de imágenes con {settings['image_model']}...")
+            done, failed = embed_pending_images(database, settings["image_model"], args.reprocesar_imagenes)
+            print(f"Imágenes con embedding nuevo: {done}")
+            for message in failed:
+                print(f"  OMITIDA: {message}")
     except EmbeddingError as exc:
         print(f"Error con el modelo de embeddings: {exc}")
         return 1

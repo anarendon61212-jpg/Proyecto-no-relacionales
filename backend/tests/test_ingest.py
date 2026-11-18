@@ -73,7 +73,7 @@ def test_main_carga_articulos_y_reemplaza_chunks():
     with mock.patch.object(ingest, "MongoClient", return_value=client), mock.patch.object(
         ingest, "embed_texts", side_effect=lambda texts, model: fake_embed(texts)
     ):
-        code = ingest.main([str(DATA_FILE), "--estrategias", "fixed-size", "sentence-aware"])
+        code = ingest.main([str(DATA_FILE), "--estrategias", "fixed-size", "sentence-aware", "--sin-imagenes"])
 
     articles = ingest.load_articles(DATA_FILE)
     assert code == 0
@@ -83,6 +83,81 @@ def test_main_carga_articulos_y_reemplaza_chunks():
     assert database.chunks.insert_many.call_count == len(articles) * 2
     first_filter = database.articulos.find_one_and_update.call_args_list[0].args[0]
     assert set(first_filter) == {"titulo", "fuente"}
+
+
+def test_dataset_con_catalogo_de_imagenes(tmp_path):
+    dataset = {
+        "articulos": [
+            {
+                "titulo": "A", "contenido_texto": "Texto uno.", "idioma": "es", "fecha": "2024-01-01",
+                "fuente": "F", "url": "https://fuente/a", "licencia": "CC BY 4.0",
+                "imagenes": ["panel-1", {"url": "https://img/2.jpg", "categoria": "eolica"}],
+            },
+            {
+                "titulo": "a", "contenido_texto": "Duplicado.", "idioma": "es", "fecha": "2024-01-02",
+                "fuente": "f",
+            },
+            {
+                "titulo": "B", "contenido_texto": "Texto dos.", "idioma": "en", "fecha": "2024-02-01",
+                "fuente": "F", "imagenes": ["no-existe"],
+            },
+        ],
+        "imagenes": [
+            {"clave": "panel-1", "url": "data/imagenes/panel.jpg", "categoria": "solar",
+             "licencia": "CC0", "atribucion": "Autor X"},
+            {"clave": "sin-articulo", "url": "data/imagenes/eolica.jpg", "categoria": "eolica"},
+        ],
+    }
+    path = tmp_path / "dataset.json"
+    path.write_text(__import__("json").dumps(dataset), encoding="utf-8")
+
+    database = mock.MagicMock()
+    image_ids = {}
+    def upsert_image(filter_, update, **kwargs):
+        return {"_id": image_ids.setdefault(filter_["url"], ObjectId())}
+    database.imagenes.find_one_and_update.side_effect = upsert_image
+    database.articulos.find_one_and_update.side_effect = lambda *a, **k: {"_id": ObjectId()}
+    client = mock.MagicMock()
+    client.__getitem__.return_value = database
+
+    with mock.patch.object(ingest, "MongoClient", return_value=client), mock.patch.object(
+        ingest, "embed_texts", side_effect=lambda texts, model: fake_embed(texts)
+    ):
+        code = ingest.main([str(path), "--estrategias", "sentence-aware", "--sin-imagenes"])
+
+    assert code == 0
+    # Las dos imágenes del catálogo + la imagen embebida en el artículo A.
+    assert set(image_ids) == {"data/imagenes/panel.jpg", "data/imagenes/eolica.jpg", "https://img/2.jpg"}
+    catalog_update = database.imagenes.find_one_and_update.call_args_list[0].args[1]["$set"]
+    assert catalog_update["licencia"] == "CC0" and catalog_update["atribucion"] == "Autor X"
+    # Solo A se guarda: el duplicado y el artículo con clave inexistente se omiten.
+    assert database.articulos.find_one_and_update.call_count == 1
+    stored = database.articulos.find_one_and_update.call_args.args[1]["$set"]
+    assert stored["licencia"] == "CC BY 4.0" and stored["url"] == "https://fuente/a"
+    assert stored["imagenes_relacionadas"] == [
+        image_ids["data/imagenes/panel.jpg"], image_ids["https://img/2.jpg"]
+    ]
+
+
+def test_embed_pending_images_omite_las_que_fallan():
+    database = mock.MagicMock()
+    ok_id, bad_id = ObjectId(), ObjectId()
+    database.imagenes.find.return_value = [{"_id": ok_id, "url": "ok.jpg"}, {"_id": bad_id, "url": "rota.jpg"}]
+
+    def load(url):
+        if url == "rota.jpg":
+            raise ingest.ImageLoadError("404")
+        return "imagen"
+
+    with mock.patch.object(ingest, "load_image", side_effect=load), mock.patch.object(
+        ingest, "embed_images", return_value=[[0.5] * 512]
+    ):
+        done, failed = ingest.embed_pending_images(database, "clip", reprocess=False)
+
+    assert done == 1 and failed == ["404"]
+    assert database.imagenes.find.call_args.args[0] == {"modelo_embedding": {"$ne": "clip"}}
+    update = database.imagenes.update_one.call_args
+    assert update.args[0] == {"_id": ok_id} and update.args[1]["$set"]["modelo_embedding"] == "clip"
 
 
 def test_main_exige_archivo_o_desde_mongo():
