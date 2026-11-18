@@ -38,6 +38,27 @@ python backend/scripts/init_db.py
 
 El inicializador crea o actualiza las colecciones `articulos`, `imagenes`, `chunks` y `usuarios`, aplica reglas de validación, crea los índices convencionales, compuesto y de texto (este último con idioma español), y solicita el índice vectorial de Atlas para `chunks.embedding` (384 dimensiones, similitud coseno, filtros por `estrategia_chunking` e `idioma`). Si Atlas M0 no permite crearlo desde el driver, el script imprime la definición JSON para crear el índice desde **Search & Vector Search** en Atlas. Atlas puede tardar un momento en dejar el índice listo.
 
+## Cargar artículos y generar chunks
+
+```powershell
+python backend/scripts/ingest.py data/articulos_ejemplo.json
+```
+
+El script de ingesta valida cada artículo, lo guarda en `articulos` (y sus imágenes en `imagenes`), lo divide en chunks con las tres estrategias y guarda cada chunk con su embedding en `chunks`. Se puede ejecutar varias veces: un artículo se identifica por `titulo` + `fuente` y sus chunks se reemplazan, no se duplican.
+
+- `data/articulos_ejemplo.json` trae 4 artículos de prueba (3 en español y 1 en inglés) para probar la API de punta a punta.
+- Acepta un archivo `.json` con una lista de artículos o un `.jsonl` con un artículo por línea. Campos obligatorios: `titulo`, `contenido_texto`, `idioma`, `fecha` (`2024-05-01` o ISO 8601) y `fuente`. Opcionales: `categoria` e `imagenes` (lista con `url`, `categoria` y, si se quiere, `descripcion` y `fuente`).
+- `--estrategias fixed-size semantic` genera solo esas estrategias; `--limite 10` procesa solo los primeros artículos.
+- `--desde-mongo` vuelve a generar los chunks de los artículos que ya están en Atlas (por ejemplo, después de cambiar de modelo de embeddings).
+
+| Estrategia | Cómo divide el texto |
+|---|---|
+| `fixed-size` | Ventanas de 150 palabras con 30 de solapamiento, sin importar dónde terminan las oraciones. |
+| `sentence-aware` | Oraciones completas hasta 150 palabras; la última oración se repite al inicio del chunk siguiente. |
+| `semantic` | Calcula el embedding de cada oración y corta donde la similitud entre oraciones consecutivas cae al 25 % más bajo (cambio de tema), con chunks de 30 a 150 palabras. |
+
+El límite de 150 palabras mantiene cada chunk dentro de lo que `all-MiniLM-L6-v2` procesa sin truncar (256 tokens).
+
 ## Ejecutar la API
 
 ```powershell
@@ -85,8 +106,8 @@ pip install -r backend/requirements-dev.txt
 pytest backend/tests
 ```
 
-Las pruebas usan una base de datos simulada; no necesitan Atlas, el modelo de embeddings ni la API key de Gemini.
+Las pruebas usan una base de datos y modelos simulados; no necesitan Atlas, el modelo de embeddings ni la API key de Gemini. Cubren la API, las tres estrategias de chunking y el script de ingesta.
 
 ## Notas de alcance
 
-Crear el cluster, el usuario y la regla de IP se hace en la cuenta Atlas del equipo. La búsqueda vectorial necesita que la ingesta haya cargado chunks con embeddings del **mismo modelo** configurado en `EMBEDDING_MODEL` (por defecto `all-MiniLM-L6-v2`, 384 dimensiones).
+Crear el cluster, el usuario y la regla de IP se hace en la cuenta Atlas del equipo. La búsqueda vectorial compara la consulta con los chunks usando el modelo configurado en `EMBEDDING_MODEL` (por defecto `all-MiniLM-L6-v2`, 384 dimensiones); si se cambia el modelo, hay que regenerar los chunks con `python backend/scripts/ingest.py --desde-mongo`.

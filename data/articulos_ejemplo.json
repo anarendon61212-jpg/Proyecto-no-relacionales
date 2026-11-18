@@ -1,0 +1,41 @@
+[
+  {
+    "titulo": "Ciudades que reutilizan el agua lluvia",
+    "contenido_texto": "Varias ciudades medianas de la región han comenzado a instalar sistemas de captación de agua lluvia en edificios públicos. Los techos de colegios y bibliotecas recogen el agua y la conducen a tanques subterráneos. Esa agua se usa luego para los sanitarios y para el riego de parques.\n\nSegún los equipos técnicos municipales, un colegio con un techo de mil metros cuadrados puede recoger cerca de un millón de litros al año en zonas con lluvias frecuentes. Esto reduce el consumo de agua potable y también la presión sobre el alcantarillado durante los aguaceros fuertes. Los sistemas incluyen filtros sencillos que retienen hojas y sedimentos antes de que el agua llegue al tanque.\n\nEl costo inicial sigue siendo la principal barrera. Un sistema completo para un edificio grande puede tardar entre cinco y ocho años en pagarse con el ahorro en la factura. Por eso algunas alcaldías ofrecen descuentos en el impuesto predial a los propietarios que instalen tanques de captación en viviendas y comercios.\n\nLos expertos recomiendan acompañar estas obras con campañas de educación. Cuando los estudiantes entienden de dónde viene el agua que usan, cuidan mejor los equipos y reportan fugas a tiempo. Algunas instituciones ya incluyen el mantenimiento de los tanques como parte de los proyectos escolares de ciencias.",
+    "idioma": "es",
+    "fecha": "2024-03-12",
+    "fuente": "Datos de ejemplo",
+    "categoria": "medio ambiente",
+    "imagenes": [
+      {
+        "url": "https://example.com/imagenes/tanque-agua-lluvia.jpg",
+        "categoria": "medio ambiente",
+        "descripcion": "Tanque de captación de agua lluvia en un colegio"
+      }
+    ]
+  },
+  {
+    "titulo": "Bases de datos documentales en proyectos universitarios",
+    "contenido_texto": "Las bases de datos documentales, como MongoDB, guardan la información en documentos con estructura flexible en lugar de tablas con columnas fijas. Esto resulta útil cuando los datos cambian con frecuencia o cuando cada registro tiene campos distintos. En proyectos universitarios permiten prototipar rápido sin diseñar un esquema completo desde el inicio.\n\nLa flexibilidad no significa ausencia de reglas. MongoDB permite definir validadores con JSON Schema para exigir campos obligatorios y tipos de datos. Así se evita que un error en la carga deje documentos incompletos que luego rompan las consultas.\n\nOtra decisión importante es cuándo embeber y cuándo referenciar. Los datos que se consultan siempre juntos y que crecen poco, como un historial corto de búsquedas, suelen embeberse dentro del documento principal. Los datos grandes o compartidos, como las imágenes, conviene guardarlos en una colección aparte y relacionarlos por identificador.\n\nFinalmente, los índices marcan la diferencia en el rendimiento. Un índice compuesto por fecha e idioma acelera los filtros más comunes, mientras que un índice de texto permite buscar palabras dentro del contenido. Para búsquedas por significado se usan índices vectoriales sobre embeddings, que encuentran textos parecidos aunque no compartan las mismas palabras.",
+    "idioma": "es",
+    "fecha": "2024-06-20",
+    "fuente": "Datos de ejemplo",
+    "categoria": "tecnología"
+  },
+  {
+    "titulo": "Huertas urbanas en terrazas y balcones",
+    "contenido_texto": "Cultivar alimentos en espacios pequeños se ha vuelto común en las ciudades. Tomates, lechugas, cebollín y hierbas aromáticas crecen bien en materas de buen tamaño ubicadas donde reciban al menos cinco horas de sol al día. El sustrato debe ser liviano y drenar bien para evitar que las raíces se pudran.\n\nEl riego es el error más frecuente de quienes empiezan. Es mejor regar a fondo y con menos frecuencia que mojar la superficie todos los días. Un truco sencillo es introducir un dedo en la tierra: si los primeros dos centímetros están secos, es momento de regar.\n\nEl compost casero cierra el ciclo. Las cáscaras de frutas, los restos de verduras y el café usado se transforman en abono en pocas semanas si se mezclan con hojas secas y se airean con regularidad. Así se reduce la basura que va al relleno sanitario y se mejora la fertilidad de las materas.\n\nAlgunas juntas de acción comunal organizan intercambios de semillas y talleres gratuitos. Estos encuentros ayudan a resolver dudas sobre plagas y a conseguir variedades adaptadas al clima local.",
+    "idioma": "es",
+    "fecha": "2024-09-05",
+    "fuente": "Datos de ejemplo",
+    "categoria": "estilo de vida"
+  },
+  {
+    "titulo": "Public libraries as digital learning hubs",
+    "contenido_texto": "Public libraries are increasingly offering free digital skills workshops. Typical sessions cover how to create a secure email account, how to recognize phishing messages, and how to use online government services. Many participants are older adults who want to stay in touch with their families.\n\nLibrarians report that small groups work best. When each person has a computer and a volunteer nearby, learners feel comfortable asking basic questions. Short sessions of about one hour, repeated weekly, help people practice without feeling overwhelmed.\n\nSome libraries also lend laptops and mobile internet devices. This helps students who need to finish homework but do not have a connection at home. Loans usually last two weeks and can be renewed if no one else is waiting.",
+    "idioma": "en",
+    "fecha": "2024-11-18",
+    "fuente": "Datos de ejemplo",
+    "categoria": "educación"
+  }
+]

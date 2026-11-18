@@ -16,7 +16,9 @@ Dejar reproducible la preparación técnica de la Entrega 1 del Sistema RAG NoSQ
 - `/search` con tres modos: `texto` (índice `$text`), `vector` (Atlas Vector Search sobre chunks, un resultado por artículo con su fragmento más parecido) e `hibrido` (por defecto; combina ambos rankings con Reciprocal Rank Fusion). Filtros por idioma, rango de fechas y estrategia de chunking.
 - `/rag`: genera el embedding de la pregunta, recupera los chunks más parecidos con `$vectorSearch` (unidos a su artículo con `$lookup`) y pide a Gemini una respuesta basada solo en ese contexto, citando los fragmentos como `[1]`, `[2]`. Devuelve también las fuentes usadas. Si no hay chunks relevantes, responde sin llamar a Gemini.
 - Historial de usuario: si `/rag` recibe `usuario_id`, guarda la pregunta embebida en `usuarios.historial`, limitada a las 20 más recientes con `$slice`.
-- Pruebas automatizadas con pytest (`backend/tests`), con base de datos y modelos simulados.
+- Script de ingesta `backend/scripts/ingest.py`: valida artículos desde JSON/JSONL (o re-procesa los que ya están en Atlas con `--desde-mongo`), guarda artículos e imágenes, genera chunks con las estrategias `fixed-size`, `sentence-aware` y `semantic` (`backend/app/chunking.py`) y almacena cada chunk con su embedding normalizado, el idioma del artículo, el modelo y la fecha de ingesta. Es idempotente: actualiza el artículo por `titulo` + `fuente` y reemplaza sus chunks por estrategia.
+- Datos de prueba en `data/articulos_ejemplo.json` para recorrer el flujo completo: ingesta → `/search` → `/rag`.
+- Pruebas automatizadas con pytest (`backend/tests`), con base de datos y modelos simulados: API, estrategias de chunking e ingesta.
 
 ## Cómo ponerlo en marcha
 
@@ -40,6 +42,12 @@ Dejar reproducible la preparación técnica de la Entrega 1 del Sistema RAG NoSQ
 
    ```powershell
    python backend/scripts/init_db.py
+   ```
+
+   Luego carga artículos y genera sus chunks (la primera vez descarga el modelo de embeddings):
+
+   ```powershell
+   python backend/scripts/ingest.py data/articulos_ejemplo.json
    ```
 
 6. Arranca la API y abre `/docs`:
@@ -94,4 +102,4 @@ Para correr las pruebas: `pip install -r backend/requirements-dev.txt` y luego `
 
 ## Pendientes externos y siguiente fase
 
-El cluster, el usuario, la contraseña y la lista de IP permitidas dependen de la cuenta Atlas del equipo; el repositorio no contiene esas credenciales y por eso la conexión real queda pendiente de ejecutar localmente. La búsqueda vectorial y `/rag` dependen de que la ingesta cargue chunks con embeddings generados con el mismo modelo configurado en `EMBEDDING_MODEL` (por defecto `all-MiniLM-L6-v2`, normalizados) y, si se quiere filtrar por idioma en el índice, con el campo `idioma` copiado del artículo. El nombre del modelo de Gemini (`GEMINI_MODEL`) puede cambiar con el tiempo; si Google lo retira, basta con actualizarlo en `.env`.
+El cluster, el usuario, la contraseña y la lista de IP permitidas dependen de la cuenta Atlas del equipo; el repositorio no contiene esas credenciales y por eso la conexión real queda pendiente de ejecutar localmente. Falta cargar el conjunto de artículos real del proyecto con `ingest.py` (en el formato descrito en el README) y comparar las tres estrategias de chunking con preguntas de prueba. Si se cambia `EMBEDDING_MODEL`, hay que regenerar los chunks con `ingest.py --desde-mongo`. El nombre del modelo de Gemini (`GEMINI_MODEL`) puede cambiar con el tiempo; si Google lo retira, basta con actualizarlo en `.env`.
