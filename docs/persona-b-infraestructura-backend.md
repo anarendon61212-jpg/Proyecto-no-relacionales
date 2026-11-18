@@ -10,9 +10,9 @@ Dejar reproducible la preparación técnica de la Entrega 1 del Sistema RAG NoSQ
 - Script de prueba de conexión mediante `ping`.
 - Inicializador idempotente de las colecciones `articulos`, `imagenes`, `chunks` y `usuarios`.
 - Validadores `$jsonSchema` con campos y tipos básicos. Los chunks requieren `doc_id`, `estrategia_chunking`, texto, fecha de ingesta y un vector de 384 componentes.
-- Índice compuesto `{ fecha: 1, idioma: 1 }`, índice de texto en título y contenido, e índice compuesto para localizar chunks por documento y estrategia.
+- Índice compuesto `{ fecha: 1, idioma: 1 }`, índice de texto en título y contenido con idioma por defecto español (stemming y stop words en español; si existía en otro idioma, el script lo recrea), e índice compuesto para localizar chunks por documento y estrategia.
 - Solicitud de creación de Atlas Vector Search sobre `chunks.embedding`, con 384 dimensiones, similitud coseno y filtro por estrategia. Si M0 rechaza la operación desde el driver, el script imprime la definición para crearla desde la interfaz de Atlas.
-- API FastAPI con `GET /health`, `POST /search`, `POST /rag` y documentación automática en `/docs`.
+- API FastAPI con `GET /health`, `POST /search`, `POST /rag` y documentación automática en `/docs`. La API arranca aunque MongoDB no responda; en ese caso `/health` devuelve `503` y se recupera sola cuando la conexión vuelve.
 - Búsqueda textual inicial con filtros opcionales por idioma y rango de fechas. `/rag` responde `501` con el alcance pendiente explicado.
 
 ## Cómo ponerlo en marcha
@@ -49,7 +49,7 @@ Dejar reproducible la preparación técnica de la Entrega 1 del Sistema RAG NoSQ
 
 | Colección | Uso | Índices/reglas principales |
 |---|---|---|
-| `articulos` | Artículos, metadatos e IDs de imágenes relacionadas | Campos obligatorios; compuesto fecha/idioma; texto en título y contenido |
+| `articulos` | Artículos, metadatos e IDs de imágenes relacionadas | Campos obligatorios; compuesto fecha/idioma; texto en título y contenido (español) |
 | `imagenes` | Referencias y metadatos de imágenes | URL y categoría requeridas; colección separada para no duplicar archivos grandes |
 | `chunks` | Fragmentos y embeddings | `estrategia_chunking` requerido; 384 dimensiones; índice por documento/estrategia; índice vectorial Atlas |
 | `usuarios` | Usuario e historial pequeño embebido | Historial como arreglo; ID de usuario único |
@@ -58,7 +58,7 @@ El modelo de 384 dimensiones corresponde al ejemplo `all-MiniLM-L6-v2` del enunc
 
 ## Probar la API
 
-Con el servidor corriendo, `GET http://127.0.0.1:8000/health` debe responder estado `ok` cuando MongoDB está accesible. `POST http://127.0.0.1:8000/search` recibe un JSON como:
+Con el servidor corriendo, `GET http://127.0.0.1:8000/health` debe responder estado `ok` cuando MongoDB está accesible y `503` cuando no lo está. `POST http://127.0.0.1:8000/search` recibe un JSON como:
 
 ```json
 {

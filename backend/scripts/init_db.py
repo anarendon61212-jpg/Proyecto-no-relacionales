@@ -100,6 +100,23 @@ VALIDATORS = {
 }
 
 
+TEXT_INDEX_NAME = "articulos_text_idx"
+TEXT_INDEX_LANGUAGE = "spanish"  # Stemming y stop words en español para $text.
+
+
+def ensure_text_index(collection) -> None:
+    """Crea el índice de texto en español; si existía con otro idioma, lo recrea."""
+    existing = collection.index_information().get(TEXT_INDEX_NAME)
+    if existing is not None and existing.get("default_language") != TEXT_INDEX_LANGUAGE:
+        collection.drop_index(TEXT_INDEX_NAME)
+        print(f"Índice de texto recreado con idioma '{TEXT_INDEX_LANGUAGE}'.")
+    collection.create_index(
+        [("titulo", "text"), ("contenido_texto", "text")],
+        name=TEXT_INDEX_NAME,
+        default_language=TEXT_INDEX_LANGUAGE,
+    )
+
+
 def main() -> None:
     settings = get_settings()
     client = MongoClient(settings["mongodb_uri"], serverSelectionTimeoutMS=5000)
@@ -130,10 +147,7 @@ def main() -> None:
             [("fecha", ASCENDING), ("idioma", ASCENDING)],
             name="fecha_idioma_idx",
         )
-        database.articulos.create_index(
-            [("titulo", "text"), ("contenido_texto", "text")],
-            name="articulos_text_idx",
-        )
+        ensure_text_index(database.articulos)
         database.chunks.create_index(
             [("doc_id", ASCENDING), ("estrategia_chunking", ASCENDING), ("chunk_index", ASCENDING)],
             name="chunks_documento_estrategia_idx",

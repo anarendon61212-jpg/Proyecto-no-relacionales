@@ -27,7 +27,7 @@ python backend/scripts/check_connection.py
 python backend/scripts/init_db.py
 ```
 
-El inicializador crea o actualiza las colecciones `articulos`, `imagenes`, `chunks` y `usuarios`, aplica reglas de validación, crea los índices convencionales, compuesto y de texto, y solicita el índice vectorial de Atlas para `chunks.embedding` (384 dimensiones, similitud coseno). Si Atlas M0 no permite crearlo desde el driver, el script imprime la definición JSON para crear el índice desde **Search & Vector Search** en Atlas. Atlas puede tardar un momento en dejar el índice listo.
+El inicializador crea o actualiza las colecciones `articulos`, `imagenes`, `chunks` y `usuarios`, aplica reglas de validación, crea los índices convencionales, compuesto y de texto (este último con idioma español), y solicita el índice vectorial de Atlas para `chunks.embedding` (384 dimensiones, similitud coseno). Si Atlas M0 no permite crearlo desde el driver, el script imprime la definición JSON para crear el índice desde **Search & Vector Search** en Atlas. Atlas puede tardar un momento en dejar el índice listo.
 
 ## Ejecutar la API
 
@@ -35,7 +35,7 @@ El inicializador crea o actualiza las colecciones `articulos`, `imagenes`, `chun
 uvicorn app.main:app --app-dir backend --reload
 ```
 
-- `GET /health`: comprueba la conexión a MongoDB.
+- `GET /health`: comprueba la conexión a MongoDB (`503` si no está disponible; la API arranca de todos modos).
 - `POST /search`: búsqueda textual en artículos con filtros opcionales de idioma y fechas.
 - `POST /rag`: ruta reservada; responde `501` mientras se incorporan recuperación vectorial y proveedor LLM.
 - `GET /docs`: documentación interactiva de FastAPI.
