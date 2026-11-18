@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pymongo import ASCENDING, MongoClient
-from pymongo.errors import PyMongoError
+from pymongo.errors import OperationFailure, PyMongoError
 from pymongo.operations import SearchIndexModel
 
 from app.config import get_settings
@@ -72,6 +72,7 @@ VALIDATORS = {
                     "maxItems": VECTOR_DIMENSIONS,
                     "items": {"bsonType": "double"},
                 },
+                "idioma": {"bsonType": "string", "minLength": 2},
                 "modelo": {"bsonType": "string"},
                 "fecha_ingesta": {"bsonType": "date"},
             },
@@ -98,6 +99,16 @@ VALIDATORS = {
         }
     },
 }
+
+
+UNAUTHORIZED_CODE = 13  # Código de MongoDB para operaciones sin permiso.
+
+
+def vector_fields_key(definition: dict) -> list:
+    """Normaliza los campos de un índice vectorial para compararlos sin importar el orden."""
+    return sorted(
+        json.dumps(field, sort_keys=True) for field in definition.get("fields", [])
+    )
 
 
 TEXT_INDEX_NAME = "articulos_text_idx"
@@ -133,14 +144,25 @@ def main() -> None:
                     validationAction="error",
                 )
             else:
-                database.command(
-                    {
-                        "collMod": name,
-                        "validator": validator,
-                        "validationLevel": "strict",
-                        "validationAction": "error",
-                    }
-                )
+                try:
+                    database.command(
+                        {
+                            "collMod": name,
+                            "validator": validator,
+                            "validationLevel": "strict",
+                            "validationAction": "error",
+                        }
+                    )
+                except OperationFailure as exc:
+                    if exc.code != UNAUTHORIZED_CODE:
+                        raise
+                    print(f"Sin permiso para actualizar el validador de '{name}' (collMod).")
+                    print(
+                        "  Asigna al usuario de Atlas el rol 'Atlas admin' o 'dbAdmin' sobre "
+                        f"'{settings['database_name']}' y vuelve a ejecutar el script."
+                    )
+                    print("  Se continúa con el validador que la colección ya tenía.")
+                    continue
             print(f"Colección lista: {name}")
 
         database.articulos.create_index(
@@ -164,6 +186,7 @@ def main() -> None:
                     "similarity": "cosine",
                 },
                 {"type": "filter", "path": "estrategia_chunking"},
+                {"type": "filter", "path": "idioma"},
             ]
         }
         try:
@@ -171,7 +194,14 @@ def main() -> None:
                 database.chunks.list_search_indexes(settings["vector_index_name"])
             )
             if existing_vector_indexes:
-                print(f"Índice vectorial ya existente: {settings['vector_index_name']}")
+                current = existing_vector_indexes[0].get("latestDefinition", {})
+                if vector_fields_key(current) != vector_fields_key(vector_definition):
+                    database.chunks.update_search_index(
+                        settings["vector_index_name"], vector_definition
+                    )
+                    print(f"Índice vectorial actualizado: {settings['vector_index_name']}")
+                else:
+                    print(f"Índice vectorial ya existente: {settings['vector_index_name']}")
             else:
                 search_index = SearchIndexModel(
                     definition=vector_definition,

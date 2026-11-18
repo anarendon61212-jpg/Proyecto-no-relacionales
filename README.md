@@ -5,7 +5,7 @@ Base de trabajo para la Entrega 1 (Persona B: Infraestructura y Backend).
 ## Requisitos
 
 - Python 3.10 o superior.
-- Un cluster MongoDB Atlas y un usuario de base de datos.
+- Un cluster MongoDB Atlas y un usuario de base de datos con rol **Atlas admin** (o `dbAdmin` sobre la base) para poder reejecutar el inicializador.
 - La IP desde la que se ejecutará el backend autorizada en Network Access de Atlas.
 
 ## Preparación
@@ -27,7 +27,7 @@ python backend/scripts/check_connection.py
 python backend/scripts/init_db.py
 ```
 
-El inicializador crea o actualiza las colecciones `articulos`, `imagenes`, `chunks` y `usuarios`, aplica reglas de validación, crea los índices convencionales, compuesto y de texto (este último con idioma español), y solicita el índice vectorial de Atlas para `chunks.embedding` (384 dimensiones, similitud coseno). Si Atlas M0 no permite crearlo desde el driver, el script imprime la definición JSON para crear el índice desde **Search & Vector Search** en Atlas. Atlas puede tardar un momento en dejar el índice listo.
+El inicializador crea o actualiza las colecciones `articulos`, `imagenes`, `chunks` y `usuarios`, aplica reglas de validación, crea los índices convencionales, compuesto y de texto (este último con idioma español), y solicita el índice vectorial de Atlas para `chunks.embedding` (384 dimensiones, similitud coseno, filtros por `estrategia_chunking` e `idioma`). Si Atlas M0 no permite crearlo desde el driver, el script imprime la definición JSON para crear el índice desde **Search & Vector Search** en Atlas. Atlas puede tardar un momento en dejar el índice listo.
 
 ## Ejecutar la API
 

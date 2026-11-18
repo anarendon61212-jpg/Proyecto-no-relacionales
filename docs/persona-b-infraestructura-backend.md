@@ -9,15 +9,15 @@ Dejar reproducible la preparación técnica de la Entrega 1 del Sistema RAG NoSQ
 - Configuración mediante `.env` para URI de MongoDB, base de datos e índice vectorial. El archivo `.env` está excluido de Git.
 - Script de prueba de conexión mediante `ping`.
 - Inicializador idempotente de las colecciones `articulos`, `imagenes`, `chunks` y `usuarios`.
-- Validadores `$jsonSchema` con campos y tipos básicos. Los chunks requieren `doc_id`, `estrategia_chunking`, texto, fecha de ingesta y un vector de 384 componentes.
+- Validadores `$jsonSchema` con campos y tipos básicos. Los chunks requieren `doc_id`, `estrategia_chunking`, texto, fecha de ingesta y un vector de 384 componentes; además pueden llevar `idioma` (copiado del artículo) para filtrar la recuperación.
 - Índice compuesto `{ fecha: 1, idioma: 1 }`, índice de texto en título y contenido con idioma por defecto español (stemming y stop words en español; si existía en otro idioma, el script lo recrea), e índice compuesto para localizar chunks por documento y estrategia.
-- Solicitud de creación de Atlas Vector Search sobre `chunks.embedding`, con 384 dimensiones, similitud coseno y filtro por estrategia. Si M0 rechaza la operación desde el driver, el script imprime la definición para crearla desde la interfaz de Atlas.
+- Solicitud de creación de Atlas Vector Search sobre `chunks.embedding`, con 384 dimensiones, similitud coseno y filtros por `estrategia_chunking` e `idioma`. Si el índice ya existía con otra definición, el script lo actualiza. Si M0 rechaza la operación desde el driver, el script imprime la definición para crearla desde la interfaz de Atlas.
 - API FastAPI con `GET /health`, `POST /search`, `POST /rag` y documentación automática en `/docs`. La API arranca aunque MongoDB no responda; en ese caso `/health` devuelve `503` y se recupera sola cuando la conexión vuelve.
 - Búsqueda textual inicial con filtros opcionales por idioma y rango de fechas. `/rag` responde `501` con el alcance pendiente explicado.
 
 ## Cómo ponerlo en marcha
 
-1. En MongoDB Atlas, crea un cluster M0, crea un usuario de base de datos y autoriza la IP del equipo en Network Access.
+1. En MongoDB Atlas, crea un cluster M0, crea un usuario de base de datos y autoriza la IP del equipo en Network Access. Para ejecutar el inicializador más de una vez, el usuario necesita el rol **Atlas admin** (o `dbAdmin` sobre la base): actualizar validadores de colecciones existentes usa `collMod`, que el rol de solo lectura/escritura no permite. Si falta el permiso, el script lo avisa y continúa.
 2. En la raíz del proyecto, instala dependencias en un entorno virtual:
 
    ```powershell
@@ -51,7 +51,7 @@ Dejar reproducible la preparación técnica de la Entrega 1 del Sistema RAG NoSQ
 |---|---|---|
 | `articulos` | Artículos, metadatos e IDs de imágenes relacionadas | Campos obligatorios; compuesto fecha/idioma; texto en título y contenido (español) |
 | `imagenes` | Referencias y metadatos de imágenes | URL y categoría requeridas; colección separada para no duplicar archivos grandes |
-| `chunks` | Fragmentos y embeddings | `estrategia_chunking` requerido; 384 dimensiones; índice por documento/estrategia; índice vectorial Atlas |
+| `chunks` | Fragmentos y embeddings | `estrategia_chunking` requerido; `idioma` opcional; 384 dimensiones; índice por documento/estrategia; índice vectorial Atlas con filtros de estrategia e idioma |
 | `usuarios` | Usuario e historial pequeño embebido | Historial como arreglo; ID de usuario único |
 
 El modelo de 384 dimensiones corresponde al ejemplo `all-MiniLM-L6-v2` del enunciado. Si el equipo cambia el modelo, debe cambiar `VECTOR_DIMENSIONS` en `backend/scripts/init_db.py` y mantener consistente el índice vectorial. Atlas Free permite hasta tres índices Search/Vector Search; este diseño requiere uno vectorial. Si M0 rechaza crearlo mediante el driver, usa **Search & Vector Search** en la interfaz y pega la definición que muestra el script.
