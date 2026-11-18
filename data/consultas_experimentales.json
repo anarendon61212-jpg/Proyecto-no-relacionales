@@ -1,0 +1,79 @@
+{
+  "_instrucciones": "Plantilla de la Persona C (entregable C4). Adapta cada consulta al dataset real ANTES de ejecutar la comparación y completa 'relevantes' con los títulos de los artículos que deberían recuperarse, si se pueden identificar manualmente. Filtros admitidos: idioma, fecha_desde, fecha_hasta (AAAA-MM-DD).",
+  "consultas": [
+    {
+      "id": "C01",
+      "consulta": "¿Qué documentos hablan de sostenibilidad ambiental?",
+      "intencion": "Búsqueda semántica general",
+      "filtros": {},
+      "relevantes": []
+    },
+    {
+      "id": "C02",
+      "consulta": "¿Qué artículos en inglés sobre tecnología se publicaron en 2024?",
+      "intencion": "Filtro por idioma y fecha",
+      "filtros": {
+        "idioma": "en",
+        "fecha_desde": "2024-01-01",
+        "fecha_hasta": "2024-12-31"
+      },
+      "relevantes": []
+    },
+    {
+      "id": "C03",
+      "consulta": "¿Cuáles son las principales tendencias de energía renovable descritas en los documentos?",
+      "intencion": "Síntesis de varios artículos",
+      "filtros": {},
+      "relevantes": []
+    },
+    {
+      "id": "C04",
+      "consulta": "¿Qué ventajas y límites de la energía solar aparecen en las fuentes?",
+      "intencion": "Búsqueda semántica específica",
+      "filtros": {},
+      "relevantes": []
+    },
+    {
+      "id": "C05",
+      "consulta": "¿Cómo comparan los artículos energía solar y eólica?",
+      "intencion": "Comparación entre artículos",
+      "filtros": {},
+      "relevantes": []
+    },
+    {
+      "id": "C06",
+      "consulta": "¿Qué tecnologías se mencionan para mejorar la eficiencia energética?",
+      "intencion": "Búsqueda semántica específica",
+      "filtros": {},
+      "relevantes": []
+    },
+    {
+      "id": "C07",
+      "consulta": "¿Qué relación describen las fuentes entre movilidad eléctrica y sostenibilidad?",
+      "intencion": "Síntesis de varios artículos",
+      "filtros": {},
+      "relevantes": []
+    },
+    {
+      "id": "C08",
+      "consulta": "¿Qué soluciones aparecen para reducir emisiones en ciudades?",
+      "intencion": "Búsqueda semántica general",
+      "filtros": {},
+      "relevantes": []
+    },
+    {
+      "id": "C09",
+      "consulta": "¿Qué ejemplos de arquitectura sostenible se describen o ilustran?",
+      "intencion": "Búsqueda semántica específica",
+      "filtros": {},
+      "relevantes": []
+    },
+    {
+      "id": "C10",
+      "consulta": "¿Qué políticas o iniciativas climáticas se mencionan y qué objetivo tienen?",
+      "intencion": "Síntesis de varios artículos",
+      "filtros": {},
+      "relevantes": []
+    }
+  ]
+}
