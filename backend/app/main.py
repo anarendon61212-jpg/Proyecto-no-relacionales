@@ -1,52 +1,96 @@
-"""API inicial para búsquedas y preguntas RAG."""
+"""API del sistema RAG: búsqueda textual, vectorial e híbrida, y preguntas con Gemini."""
 
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Literal
 
+from bson import ObjectId
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from pymongo.errors import PyMongoError
 
+from app.config import get_settings
 from app.db import get_database, lifespan
+from app.embeddings import EmbeddingError, embed_query
+from app.llm import LLMError, generate_answer
+from app.retrieval import (
+    article_filters,
+    group_chunks_by_article,
+    reciprocal_rank_fusion,
+    text_search,
+    vector_search_chunks,
+)
+
+HISTORIAL_MAXIMO = 20  # Consultas recientes que se guardan embebidas por usuario.
 
 app = FastAPI(
     title="API RAG NoSQL con MongoDB",
-    description="Backend inicial para buscar artículos y preparar el flujo RAG.",
-    version="0.1.0",
+    description=(
+        "Búsqueda textual, vectorial e híbrida sobre artículos y respuestas RAG "
+        "generadas con Google Gemini."
+    ),
+    version="0.2.0",
     lifespan=lifespan,
 )
+
+EstrategiaChunking = Literal["fixed-size", "sentence-aware", "semantic"]
 
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=2, max_length=500)
+    modo: Literal["texto", "vector", "hibrido"] = Field(
+        default="hibrido",
+        description="texto: índice $text; vector: Atlas Vector Search; hibrido: ambos combinados con RRF.",
+    )
     idioma: str | None = Field(default=None, min_length=2, max_length=10)
     fecha_desde: datetime | None = None
     fecha_hasta: datetime | None = None
+    estrategia_chunking: EstrategiaChunking | None = Field(
+        default=None, description="Solo aplica a los modos vector e hibrido."
+    )
     limit: int = Field(default=10, ge=1, le=50)
 
 
 class RagRequest(BaseModel):
     question: str = Field(min_length=2, max_length=1000)
     idioma: str | None = Field(default=None, min_length=2, max_length=10)
-    estrategia_chunking: str | None = Field(default=None, max_length=40)
-    limit: int = Field(default=5, ge=1, le=20)
+    fecha_desde: datetime | None = None
+    fecha_hasta: datetime | None = None
+    estrategia_chunking: EstrategiaChunking | None = None
+    limit: int = Field(default=5, ge=1, le=20, description="Chunks que se envían como contexto.")
+    usuario_id: str | None = Field(
+        default=None, min_length=1, max_length=100,
+        description="Si se envía, la pregunta se guarda en el historial del usuario.",
+    )
 
 
-def serialize_document(document: dict) -> dict:
+def serialize_document(document):
     """Convierte tipos BSON comunes a valores serializables como JSON."""
-    from bson import ObjectId
+    if isinstance(document, ObjectId):
+        return str(document)
+    if isinstance(document, datetime):
+        return document.isoformat()
+    if isinstance(document, list):
+        return [serialize_document(item) for item in document]
+    if isinstance(document, dict):
+        return {key: serialize_document(item) for key, item in document.items()}
+    return document
 
-    def convert(value):
-        if isinstance(value, ObjectId):
-            return str(value)
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, list):
-            return [convert(item) for item in value]
-        if isinstance(value, dict):
-            return {key: convert(item) for key, item in value.items()}
-        return value
 
-    return convert(document)
+def query_embedding(text: str) -> list[float]:
+    try:
+        return embed_query(text, get_settings()["embedding_model"])
+    except EmbeddingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def mongo_unavailable(exc: PyMongoError, vector: bool) -> HTTPException:
+    detail = "No se pudo consultar MongoDB. Revisa la conexión y los índices inicializados."
+    if vector:
+        detail += (
+            " Para búsquedas vectoriales, confirma en Atlas que el índice "
+            f"'{get_settings()['vector_index_name']}' existe y está en estado READY."
+        )
+    return HTTPException(status_code=503, detail=detail)
 
 
 @app.get("/health")
@@ -60,46 +104,121 @@ def health(database=Depends(get_database)):
 
 @app.post("/search")
 def search(payload: SearchRequest, database=Depends(get_database)):
-    """Búsqueda textual inicial; los filtros se combinan con la consulta."""
-    filters: dict = {"$text": {"$search": payload.query.strip()}}
-    if payload.idioma:
-        filters["idioma"] = payload.idioma
+    """Busca artículos por texto, por similitud semántica o combinando ambos (RRF)."""
+    query = payload.query.strip()
+    filters = article_filters(payload.idioma, payload.fecha_desde, payload.fecha_hasta)
+    use_text = payload.modo in ("texto", "hibrido")
+    use_vector = payload.modo in ("vector", "hibrido")
+    # En modo híbrido se piden más candidatos a cada lado para que la fusión tenga margen.
+    per_source = payload.limit * 2 if payload.modo == "hibrido" else payload.limit
 
-    date_filter = {}
-    if payload.fecha_desde:
-        date_filter["$gte"] = payload.fecha_desde
-    if payload.fecha_hasta:
-        date_filter["$lte"] = payload.fecha_hasta
-    if date_filter:
-        filters["fecha"] = date_filter
-
+    query_vector = query_embedding(query) if use_vector else None
     try:
-        documents = database.articulos.find(
-            filters,
-            {"score": {"$meta": "textScore"}},
-        ).sort([("score", {"$meta": "textScore"})]).limit(payload.limit)
-        results = []
-        for document in documents:
-            item = serialize_document(document)
-            results.append(item)
+        text_results = text_search(database, query, filters, per_source) if use_text else []
+        vector_results = []
+        if use_vector:
+            chunks = vector_search_chunks(
+                database,
+                get_settings()["vector_index_name"],
+                query_vector,
+                limit=min(per_source * 5, 200),
+                estrategia=payload.estrategia_chunking,
+                filters=article_filters(
+                    payload.idioma, payload.fecha_desde, payload.fecha_hasta, prefix="articulo."
+                ),
+            )
+            vector_results = group_chunks_by_article(chunks, per_source)
     except PyMongoError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="No se pudo consultar MongoDB. Revisa la conexión y los índices inicializados.",
-        ) from exc
+        raise mongo_unavailable(exc, vector=use_vector) from exc
 
-    return {"query": payload.query, "count": len(results), "results": results}
+    if payload.modo == "texto":
+        results = text_results
+    elif payload.modo == "vector":
+        results = vector_results
+    else:
+        results = reciprocal_rank_fusion(text_results, vector_results, payload.limit)
+
+    return {
+        "query": payload.query,
+        "modo": payload.modo,
+        "count": len(results),
+        "results": serialize_document(results),
+    }
 
 
 @app.post("/rag")
-def rag(payload: RagRequest):
-    """Punto de entrada reservado para recuperación de chunks e integración de un LLM."""
-    raise HTTPException(
-        status_code=501,
-        detail=(
-            "Endpoint preparado. En la siguiente etapa se conectarán la generación de "
-            "embeddings, la recuperación vectorial de chunks y el proveedor LLM."
-        ),
+def rag(payload: RagRequest, database=Depends(get_database)):
+    """Recupera los chunks más relevantes y genera una respuesta citada con Gemini."""
+    settings = get_settings()
+    question = payload.question.strip()
+    query_vector = query_embedding(question)
+    try:
+        chunks = vector_search_chunks(
+            database,
+            settings["vector_index_name"],
+            query_vector,
+            limit=payload.limit,
+            estrategia=payload.estrategia_chunking,
+            filters=article_filters(
+                payload.idioma, payload.fecha_desde, payload.fecha_hasta, prefix="articulo."
+            ),
+        )
+    except PyMongoError as exc:
+        raise mongo_unavailable(exc, vector=True) from exc
+
+    if chunks:
+        try:
+            answer = generate_answer(
+                question, chunks, settings["gemini_api_key"], settings["gemini_model"]
+            )
+        except LLMError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    else:
+        answer = (
+            "No encontré fragmentos relevantes con los filtros indicados, "
+            "así que no puedo responder con base en los artículos."
+        )
+
+    fuentes = [
+        {
+            "numero": number,
+            "doc_id": chunk["doc_id"],
+            "titulo": chunk["articulo"].get("titulo"),
+            "fuente": chunk["articulo"].get("fuente"),
+            "fecha": chunk["articulo"].get("fecha"),
+            "idioma": chunk["articulo"].get("idioma"),
+            "chunk_index": chunk.get("chunk_index"),
+            "estrategia_chunking": chunk.get("estrategia_chunking"),
+            "score": chunk.get("score"),
+            "fragmento": chunk.get("chunk_texto"),
+        }
+        for number, chunk in enumerate(chunks, start=1)
+    ]
+
+    if payload.usuario_id:
+        try:
+            database.usuarios.update_one(
+                {"usuario_id": payload.usuario_id},
+                {
+                    "$push": {
+                        "historial": {
+                            "$each": [{"consulta": question, "fecha": datetime.now(timezone.utc)}],
+                            "$slice": -HISTORIAL_MAXIMO,
+                        }
+                    }
+                },
+                upsert=True,
+            )
+        except PyMongoError:
+            pass  # El historial es secundario: no debe impedir entregar la respuesta.
+
+    return serialize_document(
+        {
+            "question": payload.question,
+            "respuesta": answer,
+            "modelo": settings["gemini_model"] if chunks else None,
+            "fuentes": fuentes,
+        }
     )
 
 

@@ -10,10 +10,8 @@ from pymongo import ASCENDING, MongoClient
 from pymongo.errors import OperationFailure, PyMongoError
 from pymongo.operations import SearchIndexModel
 
-from app.config import get_settings
+from app.config import VECTOR_DIMENSIONS, get_settings
 
-
-VECTOR_DIMENSIONS = 384  # all-MiniLM-L6-v2, según el modelo sugerido en la guía.
 
 VALIDATORS = {
     "articulos": {
