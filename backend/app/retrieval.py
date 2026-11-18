@@ -133,3 +133,58 @@ def reciprocal_rank_fusion(text_results: list[dict], vector_results: list[dict],
         document["score_vector"] = entry["scores"].get("vector")
         results.append(document)
     return results
+
+
+def image_search_pipeline(
+    index_name: str,
+    query_vector: list[float],
+    limit: int,
+    categoria: str | None = None,
+    exclude_id=None,
+) -> list[dict]:
+    """$vectorSearch sobre imágenes + artículos que las referencian.
+
+    Con `exclude_id` (búsqueda de imágenes similares a una ya guardada) se pide un
+    resultado extra y se descarta la propia imagen.
+    """
+    vector_stage: dict = {
+        "index": index_name,
+        "path": "embedding",
+        "queryVector": query_vector,
+        "numCandidates": min(max(limit * 20, 100), 10_000),
+        "limit": limit + 1 if exclude_id is not None else limit,
+    }
+    if categoria:
+        vector_stage["filter"] = {"categoria": {"$eq": categoria}}
+
+    pipeline: list[dict] = [{"$vectorSearch": vector_stage}]
+    if exclude_id is not None:
+        pipeline.append({"$match": {"_id": {"$ne": exclude_id}}})
+    pipeline += [
+        {"$limit": limit},
+        {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
+        {"$project": {"embedding": 0}},
+        {
+            "$lookup": {
+                "from": "articulos",
+                "localField": "_id",
+                "foreignField": "imagenes_relacionadas",
+                "as": "articulos",
+                "pipeline": [{"$project": {"titulo": 1, "fecha": 1, "idioma": 1, "fuente": 1}}],
+            }
+        },
+    ]
+    return pipeline
+
+
+def related_images(database, chunks: list[dict]) -> list[dict]:
+    """Imágenes enlazadas a los artículos de los chunks recuperados (caso multimodal de /rag)."""
+    ids = []
+    for chunk in chunks:
+        for image_id in chunk.get("articulo", {}).get("imagenes_relacionadas", []) or []:
+            if image_id not in ids:
+                ids.append(image_id)
+    if not ids:
+        return []
+    found = {image["_id"]: image for image in database.imagenes.find({"_id": {"$in": ids}}, {"embedding": 0})}
+    return [found[image_id] for image_id in ids if image_id in found]
