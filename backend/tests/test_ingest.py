@@ -60,6 +60,7 @@ def test_build_chunk_documents_cumple_el_validador():
             assert doc["doc_id"] == doc_id and doc["estrategia_chunking"] == estrategia
             assert len(doc["embedding"]) == 384 and all(isinstance(v, float) for v in doc["embedding"])
             assert doc["idioma"] == "es" and doc["modelo"] == "modelo-x" and doc["chunk_texto"]
+            assert doc["parametros_chunking"]["version"]
 
 
 def test_main_carga_articulos_y_reemplaza_chunks():

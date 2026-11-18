@@ -2,7 +2,7 @@
 
 Ejemplos (desde la raíz del repositorio):
     python backend/scripts/ingest.py data/articulos_ejemplo.json
-    python backend/scripts/ingest.py data/articulos.jsonl --estrategias fixed-size semantic
+    python backend/scripts/ingest.py data/articulos.jsonl --estrategias sentence-aware fixed-size
     python backend/scripts/ingest.py --desde-mongo          # re-procesa los artículos ya cargados
 
 Es idempotente: un artículo se identifica por (titulo, fuente) y se actualiza si ya existe;
@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import PyMongoError
 
-from app.chunking import ESTRATEGIAS, chunk_text
+from app.chunking import ESTRATEGIAS, ESTRATEGIAS_EXPERIMENTO, chunk_text, parametros
 from app.config import get_settings
 from app.embeddings import EmbeddingError, embed_texts
 
@@ -118,6 +118,7 @@ def build_chunk_documents(
             "doc_id": doc_id,
             "chunk_index": index,
             "estrategia_chunking": estrategia,
+            "parametros_chunking": parametros(estrategia),
             "chunk_texto": text,
             "embedding": vector,
             "idioma": article["idioma"],
@@ -141,8 +142,8 @@ def parse_args(argv=None):
         "--desde-mongo", action="store_true", help="Re-procesa los artículos que ya están en la colección."
     )
     parser.add_argument(
-        "--estrategias", nargs="+", choices=ESTRATEGIAS, default=list(ESTRATEGIAS),
-        help="Estrategias de chunking a generar (por defecto, las tres).",
+        "--estrategias", nargs="+", choices=ESTRATEGIAS, default=list(ESTRATEGIAS_EXPERIMENTO),
+        help="Estrategias de chunking a generar (por defecto, sentence-aware y semantic).",
     )
     parser.add_argument("--limite", type=int, default=None, help="Procesa solo los primeros N artículos.")
     args = parser.parse_args(argv)
